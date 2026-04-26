@@ -85,56 +85,84 @@ export default function Home() {
   const removeFromCart = (id: number) => {
     setCartItems(prev => prev.filter(item => item.id !== id))
   }
+  //APi para enviar mensaje de whatsapp
+  // 1. Función de Notificación (Llama a tu API Route interna)
+  const enviarNotificacionWhatsApp = async (numeroGestion: string, nombre: string, total: number, telefono: string, resumen: string) => {
+    try {
+      const response = await fetch('/api/whatsapp', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ 
+          numeroGestion, 
+          nombre, 
+          total, 
+          telefono, 
+          resumen 
+        }),
+      });
 
-  // Notificación automática vía API (Simulación)
-  const enviarMensajeAutomatico = async (gestion: string, resumen: string, total: number) => {
-    console.log("Enviando notificación a API interna...");
-    // Aquí puedes integrar servicios como UltraMsg, Twilio o Whati
-  }
+      const resData = await response.json();
 
+      if (!response.ok) {
+        console.error("Error detallado de la API:", resData);
+        return;
+      }
+      
+      console.log("¡Notificaciones enviadas con éxito!", resData);
+    } catch (error) {
+      console.error("Error de conexión con la ruta /api/whatsapp:", error);
+    }
+  };
+
+  // 2. Función de Proceso de Compra
   const finalizarCompra = async () => {
-    if (cartItems.length === 0 || !nombreCliente || !telefonoCliente) return
-    setIsProcessing(true)
+    if (cartItems.length === 0 || !nombreCliente || !telefonoCliente) return;
+    setIsProcessing(true);
 
-    const numeroGestion = `AE-${Math.floor(1000 + Math.random() * 9000)}`
-    const totalVenta = cartItems.reduce((acc, item) => acc + (item.precio * item.cantidad), 0)
-    const resumen = cartItems.map(item => `${item.cantidad}x ${item.nombre}`).join(', ')
+    const numeroGestion = `AE-${Math.floor(1000 + Math.random() * 9000)}`;
+    const totalVenta = cartItems.reduce((acc, item) => acc + (item.precio * item.cantidad), 0);
+    const resumenPedido = cartItems.map(item => `${item.cantidad}x ${item.nombre}`).join(', ');
 
     try {
-      // 1. Guardar en DB
+      // A. Guardar en Base de Datos (Supabase)
       const { error: errorCompra } = await supabase.from('compras').insert([{
         numero_gestion: numeroGestion,
         nombre_cliente: nombreCliente,
         telefono_cliente: telefonoCliente,
-        nombre_producto: resumen,
+        nombre_producto: resumenPedido,
         total: totalVenta
-      }])
-      if (errorCompra) throw errorCompra
+      }]);
+      
+      if (errorCompra) throw errorCompra;
 
-      // 2. Restar Stock usando la función RPC (Optimizado para memoria y concurrencia)
+      // B. Actualizar Stock (RPC)
       for (const item of cartItems) {
-        await supabase.rpc('decrement_stock', { row_id: item.id, quantity: item.cantidad })
+        await supabase.rpc('decrement_stock', { row_id: item.id, quantity: item.cantidad });
       }
 
-      // 3. Notificar vía API (No redirige, sucede en background)
-      await enviarMensajeAutomatico(numeroGestion, resumen, totalVenta)
+      // C. Disparar Notificaciones WhatsApp
+      await enviarNotificacionWhatsApp(numeroGestion, nombreCliente, totalVenta, telefonoCliente, resumenPedido);
 
-      // 4. Mostrar Éxito
-      setOrderSuccess({ id: numeroGestion, phone: telefonoCliente })
-      setCartItems([]); setNombreCliente(''); setTelefonoCliente(''); setIsCartOpen(false)
-      fetchProductos()
+      // D. Feedback de Éxito al Usuario
+      setOrderSuccess({ id: numeroGestion, phone: telefonoCliente });
+      setCartItems([]); 
+      setNombreCliente(''); 
+      setTelefonoCliente(''); 
+      setIsCartOpen(false);
+      
+      // E. Refrescar productos para ver stock actualizado
+      fetchProductos();
 
     } catch (err) {
-      console.error(err)
+      console.error("Error en el flujo de compra:", err);
     } finally {
-      setIsProcessing(false)
+      setIsProcessing(false);
     }
-  }
+  };
 
-  // Optimización: Cálculos memoizados para evitar procesamiento en cada render
-  const totalCart = useMemo(() => cartItems.reduce((acc, item) => acc + (item.precio * item.cantidad), 0), [cartItems])
-  const totalArticulos = useMemo(() => cartItems.reduce((acc, item) => acc + item.cantidad, 0), [cartItems])
-
+  // 3. Cálculos Memorizados (Performance)
+  const totalCart = useMemo(() => cartItems.reduce((acc, item) => acc + (item.precio * item.cantidad), 0), [cartItems]);
+  const totalArticulos = useMemo(() => cartItems.reduce((acc, item) => acc + item.cantidad, 0), [cartItems]);
   if (loading) return <div className="min-h-screen bg-[#fdfaf5] flex items-center justify-center font-serif tracking-widest uppercase italic">Aura Élégance...</div>
 
   return (
