@@ -289,6 +289,7 @@ export default function Home() {
               <button onClick={() => setOrderSuccess(null)} className="w-full bg-black text-white py-5 rounded-full text-[10px] font-bold tracking-widest uppercase">Cerrar</button>
             </motion.div>
           </div>
+          
         )}
       </AnimatePresence>
     </main>
