@@ -17,6 +17,8 @@ export default function AdminPage() {
   const [categoria, setCategoria] = useState('')
   const [descripcion, setDescripcion] = useState('')
   const [stock, setStock] = useState('0')
+  // Nuevo estado para los archivos
+  const [archivos, setArchivos] = useState<FileList | null>(null)
 
   // --- CARGA DE DATOS ---
   const fetchData = useCallback(async () => {
@@ -45,7 +47,6 @@ export default function AdminPage() {
     const inicioMes = new Date(ahora.getFullYear(), ahora.getMonth(), 1)
     const ventasMes = compras.filter(c => new Date(c.created_at) >= inicioMes)
     
-    // Producto más stalkeado (por views)
     const masStalkeado = [...productos].sort((a, b) => (b.views || 0) - (a.views || 0))[0]
     
     return { 
@@ -64,23 +65,61 @@ export default function AdminPage() {
   }
 
   const resetForm = () => {
-    setEditId(null); setNombre(''); setPrecio(''); setCategoria(''); setDescripcion(''); setStock('0')
+    setEditId(null); setNombre(''); setPrecio(''); setCategoria(''); setDescripcion(''); setStock('0'); setArchivos(null)
   }
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     try {
       setUploading(true)
-      let urlsPublicas = editId ? productos.find(p => p.id === editId)?.imagenes || [] : []
-      const datosProducto = { nombre, precio: parseFloat(precio), categoria, descripcion, stock: parseInt(stock), imagenes: urlsPublicas }
+      let urlsPublicas: string[] = []
+
+      // --- LÓGICA DE SUBIDA A "imagenes-ropa" ---
+      if (archivos && archivos.length > 0) {
+        for (let i = 0; i < Math.min(archivos.length, 3); i++) {
+          const file = archivos[i]
+          const fileExt = file.name.split('.').pop()
+          const fileName = `${Date.now()}-${Math.random().toString(36).substring(7)}.${fileExt}`
+          
+          const { error: uploadError } = await supabase.storage
+            .from('imagenes-ropa')
+            .upload(fileName, file)
+
+          if (uploadError) throw uploadError
+
+          const { data: { publicUrl } } = supabase.storage
+            .from('imagenes-ropa')
+            .getPublicUrl(fileName)
+          
+          urlsPublicas.push(publicUrl)
+        }
+      } else if (editId) {
+        // Si estamos editando y no hay archivos nuevos, mantenemos las actuales
+        urlsPublicas = productos.find(p => p.id === editId)?.imagenes || []
+      }
+
+      if (urlsPublicas.length === 0) throw new Error("Debes subir al menos una imagen")
+
+      const datosProducto = { 
+        nombre, 
+        precio: parseFloat(precio), 
+        categoria, 
+        descripcion, 
+        stock: parseInt(stock), 
+        imagenes: urlsPublicas 
+      }
       
-      if (editId) await supabase.from('productos').update(datosProducto).eq('id', editId)
+      if (editId) await supabase.from('productos').update(datosProducto).eq( 'id', editId)
       else await supabase.from('productos').insert([datosProducto])
       
       resetForm()
       fetchData()
-    } catch (error: any) { alert(error.message) }
-    finally { setUploading(false) }
+      alert("¡Operación realizada con éxito!")
+    } catch (error: any) { 
+      alert("Error: " + error.message) 
+    } finally { 
+      setUploading(false) 
+    }
   }
 
   if (loading) return <div className="min-h-screen bg-[#fdfaf5] flex items-center justify-center font-serif italic text-2xl animate-pulse">Aura Élégance...</div>
@@ -138,21 +177,33 @@ export default function AdminPage() {
                     </select>
                   </div>
 
+                  {/* NUEVO APARTADO DE IMÁGENES */}
+                  <div className="p-6 border-2 border-dashed border-gray-100 rounded-[2rem] bg-gray-50/30 text-center">
+                    <label className="text-[10px] font-bold uppercase text-gray-400 block mb-4 italic tracking-widest">Fotos (Máximo 3)</label>
+                    <input 
+                      type="file" 
+                      accept="image/*" 
+                      multiple 
+                      onChange={(e) => setArchivos(e.target.files)} 
+                      className="text-[10px] w-full" 
+                    />
+                  </div>
+
                   <button type="submit" disabled={uploading} className="w-full bg-black text-white p-5 rounded-full text-[10px] font-bold uppercase tracking-widest hover:bg-gray-800 transition-all active:scale-95">
                     {uploading ? 'PROCESANDO...' : editId ? 'GUARDAR CAMBIOS' : 'PUBLICAR PRODUCTO'}
                   </button>
-                  {editId && <button type="button" onClick={resetForm} className="w-full text-[10px] text-gray-400 font-bold uppercase tracking-widest pt-2">Cancelar</button>}
+                  {editId && <button type="button" onClick={resetForm} className="w-full text-[10px] text-gray-400 font-bold uppercase tracking-widest pt-2 text-center">Cancelar</button>}
                 </div>
               </form>
             </div>
 
-            {/* LISTADO DE PRODUCTOS (MÓVIL CARDS / DESKTOP TABLE) */}
+            {/* LISTADO DE PRODUCTOS */}
             <div className="xl:col-span-3">
               {/* VISTA MÓVIL (Cards) */}
               <div className="grid grid-cols-1 gap-4 xl:hidden">
                 {productos.map((p) => (
                   <div key={p.id} className="bg-white p-5 rounded-[2rem] shadow-sm border border-gray-100 flex gap-5">
-                    <img src={p.imagenes[0]} className="w-20 h-28 object-cover rounded-xl shadow-sm" alt="" />
+                    <img src={p.imagenes?.[0]} className="w-20 h-28 object-cover rounded-xl shadow-sm" alt="" />
                     <div className="flex flex-col justify-between py-1 flex-1">
                       <div>
                         <h3 className="font-serif text-lg leading-tight">{p.nombre}</h3>
@@ -191,7 +242,7 @@ export default function AdminPage() {
                       <tr key={p.id} className="group hover:bg-gray-50/30 transition-colors">
                         <td className="p-10">
                           <div className="flex items-center gap-6">
-                            <img src={p.imagenes[0]} className="w-16 h-20 object-cover rounded-xl shadow-md" alt="" />
+                            <img src={p.imagenes?.[0]} className="w-16 h-20 object-cover rounded-xl shadow-md" alt="" />
                             <div>
                               <span className="font-serif text-xl block">{p.nombre}</span>
                               <span className="text-sm font-light italic text-gray-500">Q{p.precio.toFixed(2)}</span>
@@ -226,7 +277,6 @@ export default function AdminPage() {
 
         {view === 'pedidos' && (
           <div className="space-y-6 md:space-y-10">
-            {/* STATS RÁPIDOS */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4 md:gap-10">
               <div className="bg-black p-8 md:p-12 rounded-[2rem] md:rounded-[3.5rem] text-white">
                 <p className="text-[10px] uppercase tracking-widest font-bold opacity-50 mb-2">Ingresos {stats.mesNombre}</p>
@@ -238,9 +288,7 @@ export default function AdminPage() {
               </div>
             </div>
 
-            {/* TABLA DE PEDIDOS RESPONSIVA */}
             <div className="bg-white rounded-[2rem] md:rounded-[3.5rem] shadow-sm border border-gray-100 overflow-hidden">
-               {/* MÓVIL PEDIDOS */}
                <div className="xl:hidden divide-y divide-gray-50">
                   {compras.map((c) => (
                     <div key={c.id} className="p-6 space-y-3">
@@ -263,7 +311,6 @@ export default function AdminPage() {
                   ))}
                </div>
 
-               {/* DESKTOP PEDIDOS */}
                <table className="hidden xl:table w-full">
                   <thead className="bg-gray-50 border-b border-gray-100 text-[10px] uppercase tracking-widest text-gray-400">
                     <tr className="text-left">
@@ -297,28 +344,25 @@ export default function AdminPage() {
         {view === 'analitica' && (
           <div className="space-y-8 md:space-y-12 animate-in fade-in duration-500">
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6 md:gap-10 text-center md:text-left">
-              {/* Mas stalkeado */}
               <div className="bg-white p-8 md:p-12 rounded-[2rem] md:rounded-[3.5rem] shadow-sm border border-gray-100 flex flex-col items-center md:items-start justify-center">
                 <p className="text-[10px] uppercase tracking-widest font-bold text-gray-400 mb-6 italic">El más deseado (Clics)</p>
                 {stats.masStalkeado ? (
                   <div className="flex flex-col md:flex-row items-center gap-6">
-                    <img src={stats.masStalkeado.imagenes[0]} className="w-24 h-32 object-cover rounded-[1.5rem] shadow-xl" alt="" />
+                    <img src={stats.masStalkeado.imagenes?.[0]} className="w-24 h-32 object-cover rounded-[1.5rem] shadow-xl" alt="" />
                     <div>
                       <h4 className="font-serif text-2xl">{stats.masStalkeado.nombre}</h4>
                       <p className="text-4xl font-black text-blue-500 mt-2">{stats.masStalkeado.views || 0} <span className="text-[10px] uppercase text-gray-300 tracking-widest">Interacciones</span></p>
                     </div>
                   </div>
-                ) : <p className="text-gray-300 italic">No hay datos de telemetría aún</p>}
+                ) : <p className="text-gray-300 italic">No hay datos aún</p>}
               </div>
 
-              {/* Tasa de Conversión */}
               <div className="bg-black p-8 md:p-12 rounded-[2rem] md:rounded-[3.5rem] text-white flex flex-col items-center md:items-start justify-center">
                 <p className="text-[10px] uppercase tracking-widest font-bold text-gray-500 mb-2">Órdenes del Mes</p>
                 <h4 className="text-6xl font-serif italic text-blue-400">{stats.cantidadMes}</h4>
-                <p className="text-[10px] uppercase tracking-widest font-bold text-gray-500 mt-2">Ventas concretadas satisfactoriamente</p>
+                <p className="text-[10px] uppercase tracking-widest font-bold text-gray-500 mt-2">Ventas concretadas</p>
               </div>
 
-              {/* Total histórico simple */}
               <div className="bg-white p-8 md:p-12 rounded-[2rem] md:rounded-[3.5rem] shadow-sm border border-gray-100 flex flex-col items-center md:items-start justify-center">
                 <p className="text-[10px] uppercase tracking-widest font-bold text-gray-400 mb-2">Ingreso Total Acumulado</p>
                 <h4 className="text-4xl font-serif">Q{compras.reduce((a,b)=>a+b.total, 0).toFixed(2)}</h4>
